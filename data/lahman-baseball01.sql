@@ -132,7 +132,8 @@ SELECT yearid,
 	   ROUND(w::decimal/(w::decimal+l::decimal)*100,2) AS win_perc
 FROM teams
 WHERE wswin='Y' AND yearid BETWEEN 1970 AND 2016
-ORDER BY win_perc ASC;
+ORDER BY win_perc ASC
+LIMIT 1;
 
 --2001 SEA w/ 116 wins No ws win
 SELECT yearid,
@@ -142,7 +143,8 @@ SELECT yearid,
 	   ROUND(w::decimal/(w::decimal+l::decimal)*100,2) AS win_perc
 FROM teams
 WHERE wswin='N' AND yearid BETWEEN 1970 AND 2016
-ORDER BY w DESC;
+ORDER BY w DESC
+LIMIT 1;
 
 --most wins and ws win: NYA 1998
 
@@ -152,7 +154,8 @@ SELECT yearid,
 	   w
 FROM teams
 WHERE wswin='Y' AND yearid BETWEEN 1970 AND 2016
-ORDER BY w DESC;
+ORDER BY w DESC
+LIMIT 1;
 
 --most wins by a team each year
 
@@ -279,7 +282,7 @@ Consider only players who have played in the league for at least 10 years, and w
 Report the players' first and last names and the number of home runs they hit in 2016. */
 	   
 WITH sixteen_hr AS 	(SELECT playerid,
-						   hr AS 2016_hr
+						   hr AS sixteen_szn_hr
 					 FROM batting
 					 WHERE yearid=2016 AND playerid IN (SELECT playerid
 														FROM batting
@@ -298,8 +301,181 @@ WITH sixteen_hr AS 	(SELECT playerid,
 					 GROUP BY playerid
 					 ORDER BY career_high_hr DESC)
 
-SELECT * 
+SELECT CONCAT(p.namefirst,' ',p.namelast) AS full_name,
+	   sixteen_szn_hr,
+	   career_high_hr
 FROM sixteen_hr AS shr
-FULL JOIN career_hr AS chr
-ON shr.playerid=chr.playerid
+INNER JOIN career_hr AS chr
+ON shr.playerid=chr.playerid AND shr.sixteen_szn_hr=chr.career_high_hr
+INNER JOIN people AS p
+ON p.playerid=shr.playerid
+
+
+SELECT * FROM batting
+WHERE playerid='uptonju01'
+
+
+
+/* 11. Is there any correlation between number of wins and team salary? 
+Use data from 2000 and later to answer this question. As you do this analysis, 
+keep in mind that salaries across the whole league tend to increase together, 
+so you may want to look on a year-by-year basis. */
+
+WITH wins_perszn AS	   (SELECT teams.yearid,
+							   teams.teamid,
+							   SUM(w) AS total_wins
+						FROM teams
+						GROUP BY teams.yearid, teams.teamid
+						ORDER BY teams.yearid DESC, teams.teamid ASC),
+						
+						
+	sal_perszn	 AS	   (SELECT SUM(salary) AS tot_sal,
+								yearid,
+								teamid
+
+						FROM salaries
+
+						GROUP BY yearid, teamid
+						ORDER BY yearid DESC, teamid ASC),
+
+       
+	combined AS		   (SELECT wins_perszn.yearid,
+							   wins_perszn.teamid,
+							   sal_perszn.tot_sal AS total_salary,
+							   wins_perszn.total_wins AS wins
+						FROM wins_perszn
+						INNER JOIN sal_perszn
+						ON sal_perszn.teamid=wins_perszn.teamid AND sal_perszn.yearid=wins_perszn.yearid)
+
+SELECT corr(combined.wins, combined.total_salary) AS corr_coef,
+	   combined.yearid
+FROM combined
+GROUP BY combined.yearid
+
+
+/* 12. In this question, you will explore the connection between number of wins and attendance.
+      Does there appear to be any correlation between attendance at home games and number of wins? 
+      Do teams that win the world series see a boost in attendance the following year? 
+	  What about teams that made the playoffs? Making the playoffs means either being a division winner or a wild card winner. */
+	
+--Gives the year and correlation coefficient of wins to total attendance for that year
+
+WITH wins_att AS   (SELECT SUM(homegames.attendance) AS total_att,
+						   teams.name,
+						   year,
+						   w
+					FROM homegames
+					INNER JOIN teams
+					ON teams.teamid=homegames.team AND teams.yearid=homegames.year
+					GROUP BY teams.name, year, w
+					ORDER BY year DESC, teams.name)
+					
+SELECT
+	   year,
+	   corr(w, total_att) AS corr_coef
+FROM wins_att
+GROUP BY year
+ORDER BY year DESC;
+
+
+---WS win vs attendance.  Query returns # and % of teams that saw an increase in attendance the year following a WS win.
+
+
+WITH att_change AS	(SELECT t.attendance AS nxt_yr,
+							a.attendance AS Ws_yr,
+							a.name,
+							CONCAT(a.yearid,'-',t.yearid) AS yr_span,
+						    CASE WHEN t.attendance>a.attendance THEN 'Higher'
+								 WHEN t.attendance<a.attendance THEN 'Lower'
+								 ELSE 'Equal'
+								 END AS attendance_change
+					 FROM teams AS t, 
+							   (SELECT attendance,
+									   yearid,
+									   name
+								FROM teams
+								WHERE wswin='Y' AND attendance IS NOT NULL) AS a
+					WHERE t.name=a.name AND t.yearid=(a.yearid+1))
+					
+SELECT SUM (CASE WHEN attendance_change = 'Higher' THEN 1
+	             ELSE 0
+			     END) AS total_higher,
+	   ROUND(SUM (CASE WHEN attendance_change = 'Higher' THEN 1
+	             ELSE 0
+			     END)::decimal/COUNT(*)::decimal*100,3) AS percent_higher
+FROM att_change;
+
+
+---playoff appearance vs attendance.  Query returns # and % of teams that saw an increase in attendance the year following a playoff appearance.
+
+
+WITH att_change AS	(SELECT t.attendance AS nxt_yr,
+							a.attendance AS Ws_yr,
+							a.name,
+							CONCAT(a.yearid,'-',t.yearid) AS yr_span,
+						    CASE WHEN t.attendance>a.attendance THEN 'Higher'
+								 WHEN t.attendance<a.attendance THEN 'Lower'
+								 ELSE 'Equal'
+								 END AS attendance_change
+					 FROM teams AS t, 
+							   (SELECT attendance,
+									   yearid,
+									   name
+								FROM teams
+								WHERE (divwin='Y' OR wcwin='Y')) AS a
+					WHERE t.name=a.name AND t.yearid=(a.yearid+1))
+					
+SELECT SUM (CASE WHEN attendance_change = 'Higher' THEN 1
+	             ELSE 0
+			     END) AS total_higher,
+	   ROUND(SUM (CASE WHEN attendance_change = 'Higher' THEN 1
+	             ELSE 0
+			     END)::decimal/COUNT(*)::decimal*100,3) AS percent_higher
+FROM att_change;
+
+
+/* 13. It is thought that since left-handed pitchers are more rare, causing batters to face them less often, that they are more effective. 
+Investigate this claim and present evidence to either support or dispute this claim. 
+First, determine just how rare left-handed pitchers are compared with right-handed pitchers. 
+Are left-handed pitchers more likely to win the Cy Young Award? Are they more likely to make it into the hall of fame? */
+
+--Gives percentage of pitchers which are left-handed
+WITH left_pitch AS	   (SELECT COUNT(*) AS num_p
+						FROM people
+						WHERE throws='L' AND playerid IN (SELECT DISTINCT playerid
+														  FROM pitching
+														 WHERE g>0)),
+
+	right_pitch AS	   (SELECT COUNT(*) AS num_p
+						FROM people
+						WHERE throws='R' AND playerid IN (SELECT DISTINCT playerid
+														  FROM pitching
+														 WHERE g>0))
+														 
+SELECT ROUND(((left_pitch.num_p)::decimal/(left_pitch.num_p::decimal+right_pitch.num_p::decimal)*100),3) AS percentage_lefty
+FROM left_pitch,
+     right_pitch
+
+--This query returns the % of cy young winners who were left-handed.  
+--33.0% of cy young winners are left handed and only 27.3% of pitchers are left handed.
+
+		
+WITH l_cy AS (SELECT COUNT(*) AS players_l
+			  FROM awardsplayers
+			  INNER JOIN people
+			  USING(playerid)
+			  WHERE awardid='Cy Young Award' AND throws='L'),
+
+	 r_cy AS (SELECT COUNT(*) AS players_r
+			  FROM awardsplayers
+	  		  INNER JOIN people
+			  USING(playerid)
+			  WHERE awardid='Cy Young Award' AND throws='R')
+			  
+SELECT ROUND((l_cy.players_l::decimal/(l_cy.players_l::decimal+r_cy.players_r::decimal))*100,3) AS percent_l_cy
+FROM l_cy,
+	 r_cy
+	 
+--
+
 
