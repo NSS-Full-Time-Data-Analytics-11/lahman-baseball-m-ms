@@ -476,6 +476,25 @@ SELECT ROUND((l_cy.players_l::decimal/(l_cy.players_l::decimal+r_cy.players_r::d
 FROM l_cy,
 	 r_cy
 	 
---
+--Gives % of pitchers who are in the hall of fame and left handed.
+WITH left_h AS	   (SELECT COUNT(DISTINCT h.playerid) AS hof_left
+					FROM halloffame AS h
+					INNER JOIN people AS p2
+					ON h.playerid=p2.playerid
+					WHERE h.playerid IN (SELECT DISTINCT playerid
+										 FROM pitching)
+								AND inducted='Y' AND throws='L'),
 
+	total_hof AS   (SELECT COUNT(DISTINCT h.playerid) AS hof_tot
+					FROM halloffame AS h
+					INNER JOIN people AS p2
+					ON h.playerid=p2.playerid
+					WHERE h.playerid IN (SELECT DISTINCT playerid
+										 FROM pitching)
+								AND inducted='Y')
+
+SELECT ROUND((left_h.hof_left::decimal)/(total_hof.hof_tot)*100,3) AS percent_lefty_hof
+FROM left_h,
+	 total_hof
+				
 
